@@ -29,8 +29,10 @@ class ModelConfig:
         self.head_dim = getattr(
             self.hf_config,
             "head_dim",
-            self.hf_config.hidden_size // self.hf_config.num_attention_heads,
+            self.hf_config.hidden_size // self.hf_config.num_attention_heads
         )
+        if self.head_dim is None:
+            self.head_dim = self.hf_config.hidden_size // self.hf_config.num_attention_heads
         self.num_attention_heads = self.hf_config.num_attention_heads
         self.num_key_value_heads = getattr(self.hf_config, "num_key_value_heads", None)
 
