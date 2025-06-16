@@ -52,6 +52,7 @@ class GenerateReqInput(BaseModel):
     text: str
     input_ids: Optional[List[int]]
     sampling_params: SamplingParams
+    payload: dict
     stream: bool = True
 
 def process_stream_output(chunk: dict, output: RequestFuncOutput, **kwargs):
@@ -104,12 +105,13 @@ async def async_send_request(
                                 output.itl.append(timestamp - most_recent_timestamp)
 
                             most_recent_timestamp = timestamp
-                            process_stream_output(data, output, current_experiment_state_time=st)
+                            # TODO(Y): temp fix for now, reverse later
+                            #process_stream_output(data, output, current_experiment_state_time=st)
                         output.request_latency = time.perf_counter() - st
                 else:
                     output.error = response.reason
                     output.success = False
-        except Exception:
+        except Exception as e:
             output.success = False
             exc_info = sys.exc_info()
             output.error = "".join(traceback.format_exception(*exc_info))
@@ -117,7 +119,9 @@ async def async_send_request(
     #  throughput as token generated per second
     output.scheduling_overhead = scheduling_overhead
     if output.success:
-        output.tpot = (output.request_latency - output.ttft) / max(1, output.output_len)
+        # TODO(Y): temp fix for now, reverse later
+        #output.tpot = (output.request_latency - output.ttft) / max(1, output.output_len)
+        output.tpot = (output.request_latency - output.ttft) / payload['max_tokens']
     yield output
 
 async def generate_request_helper(obj: GenerateReqInput):
@@ -141,7 +145,7 @@ async def generate_request_helper(obj: GenerateReqInput):
     #     "rid": rid,
     #     "stream": True
     # }
-    payload = obj.sampling_params.dict()
+    payload = obj.payload
     text = obj.text
     input_ids = obj.input_ids
     async def get_requests():
@@ -162,12 +166,24 @@ async def process_req(request: Request):
         assert 'max_tokens' in obj.keys()
         assert isinstance(obj['prompt'], str)
 
+        sampling_params=SamplingParams()
+        sampling_params.max_new_tokens = obj['max_tokens']
+        sampling_params.temperature = obj['temperature']
+
+        payload = obj.copy()
+        extra_keys = ['prompt_len', 'job_id', 'job_end']
+        for key in extra_keys:
+            if key in payload.keys():
+                del payload[key]
+
         generate_req_input = GenerateReqInput(
             text=obj['prompt'], 
             input_ids=None, 
-            sampling_params=obj, 
+            sampling_params=sampling_params, 
+            payload=payload, 
             stream=True
         )
+        
         # generate_req_input = GenerateReqInput(**obj)
         # if text doesn't have tokenization/tokenize the input here
         if not generate_req_input.input_ids:
@@ -192,6 +208,7 @@ async def process_runtime_selection():
         hit_rates = [0 for _ in runtimes] # TODO add hot/cold support
         try:
             runtime_id = request_router.select_runtime(text=text, experiment_id="1", input_ids=input_ids, request_id=request_id, sampling_params=sampling_params, runtime_id_with_highest_hit_rate=highest_idx, hit_rates=hit_rates)
+            #runtime_id = 0 # TODO(Y): need to change it back
             runtime_events[request_id] = (runtime_events[request_id][0], runtime_id)
         except Exception as e:
             logger.error(f"Error selecting runtime: {e}")
@@ -207,7 +224,8 @@ async def process_cleanup_selection():
 
 app = FastAPI()
 
-@app.post("/generate")
+#@app.post("/generate")
+@app.post("/v1/completions")
 async def generate(request: Request):
     return await process_req(request)
 
