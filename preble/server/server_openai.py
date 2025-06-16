@@ -55,12 +55,17 @@ class GenerateReqInput(BaseModel):
     payload: dict
     stream: bool = True
 
-def process_stream_output(chunk: dict, output: RequestFuncOutput, **kwargs):
-    current_experiment_state_time = kwargs['current_experiment_state_time']
-    output.generated_text += chunk["text"]
-    output.output_len = chunk['meta_info']['completion_tokens']
-    output.arrival_time = chunk['meta_info']['arrival_time'] - current_experiment_state_time
-    output.append_to_queue_time = chunk['meta_info']['append_to_queue_time'] - current_experiment_state_time
+def process_stream_output(data: dict, output: RequestFuncOutput, **kwargs):
+    if choices := data.get("choices"):
+        text = choices[0].get("text")
+        output.generated_text += text or ""
+    if usage := data.get("usage"):
+        output.output_len = usage["completion_tokens"]
+    #current_experiment_state_time = kwargs['current_experiment_state_time']
+    #output.generated_text += chunk["text"]
+    #output.output_len = chunk['meta_info']['completion_tokens']
+    #output.arrival_time = chunk['meta_info']['arrival_time'] - current_experiment_state_time
+    #output.append_to_queue_time = chunk['meta_info']['append_to_queue_time'] - current_experiment_state_time
 
 async def async_send_request(
     text=None, input_ids=None, payload=None, runtime_id=None, runtime_url=None, rid=None
@@ -105,8 +110,7 @@ async def async_send_request(
                                 output.itl.append(timestamp - most_recent_timestamp)
 
                             most_recent_timestamp = timestamp
-                            # TODO(Y): temp fix for now, reverse later
-                            #process_stream_output(data, output, current_experiment_state_time=st)
+                            process_stream_output(data, output, current_experiment_state_time=st)
                         output.request_latency = time.perf_counter() - st
                 else:
                     output.error = response.reason
@@ -119,9 +123,7 @@ async def async_send_request(
     #  throughput as token generated per second
     output.scheduling_overhead = scheduling_overhead
     if output.success:
-        # TODO(Y): temp fix for now, reverse later
-        #output.tpot = (output.request_latency - output.ttft) / max(1, output.output_len)
-        output.tpot = (output.request_latency - output.ttft) / payload['max_tokens']
+        output.tpot = (output.request_latency - output.ttft) / max(1, output.output_len)
     yield output
 
 async def generate_request_helper(obj: GenerateReqInput):
